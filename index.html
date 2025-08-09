@@ -6,7 +6,7 @@
 <title>WebXR AR - Medição de Distância</title>
 <style>
  html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#111;color:#ddd}
- #info, #distance-panel {
+ #info, #distance-panel, #coordinates-panel {
   position:fixed;
   left:10px;
   z-index:2;
@@ -17,7 +17,8 @@
   overflow-y: auto;
  }
  #info { top: 10px; }
- #distance-panel { top: 100px; }
+ #coordinates-panel { top: 100px; } /* 💡 Novo painel */
+ #distance-panel { top: 300px; }
  canvas{display:block}
 </style>
 </head>
@@ -25,6 +26,10 @@
 <div id="info">
  <strong>WebXR AR - Medição de Distância</strong><br>
  Toque para colocar cubos e ver a distância entre eles.
+</div>
+
+<div id="coordinates-panel">
+ <h3>Coordenadas Salvas:</h3>
 </div>
 
 <div id="distance-panel">
@@ -42,10 +47,10 @@
  let hitTestSource = null;
  let localReferenceSpace = null;
  let hitTestResult = null;
- 
- let blockCounter = 0;
- const distancePanel = document.getElementById('distance-panel'); // 💡 Obtém o novo elemento do HTML
 
+ let blockCounter = 0;
+ const distancePanel = document.getElementById('distance-panel');
+ const coordinatesPanel = document.getElementById('coordinates-panel'); // 💡 Obtém o novo painel
  init();
  animate();
 
@@ -123,7 +128,8 @@
  reticle.visible = false;
  anchoredObjects = [];
  blockCounter = 0;
- distancePanel.innerHTML = '<h3>Distâncias:</h3>'; // 💡 Limpa o painel
+ distancePanel.innerHTML = '<h3>Distâncias:</h3>';
+ coordinatesPanel.innerHTML = '<h3>Coordenadas Salvas:</h3>'; // 💡 Limpa o painel de coordenadas
  }
 
  function onSelect(){
@@ -140,38 +146,47 @@
   label.position.y = 0.1;
   box.add(label);
   scene.add(box);
-  anchoredObjects.push({ anchor, box, label });
+  // 💡 Armazenamos o nome do bloco na lista
+  anchoredObjects.push({ anchor, box, label, blockName });
   
-  // 💡 Chamada para atualizar as distâncias
   updateDistances();
+  updateCoordinates(); // 💡 Chamada para atualizar as coordenadas
   })
   .catch(error => {
   console.error("Erro ao criar âncora:", error);
   });
  }
- 
- // 💡 Função que calcula e exibe as distâncias
+
  function updateDistances() {
-  distancePanel.innerHTML = '<h3>Distâncias:</h3>'; // Limpa o painel
-  
+  distancePanel.innerHTML = '<h3>Distâncias:</h3>';
+ 
   if (anchoredObjects.length < 2) return;
-  
+ 
   for (let i = 0; i < anchoredObjects.length; i++) {
    for (let j = i + 1; j < anchoredObjects.length; j++) {
     const block1 = anchoredObjects[i].box;
     const block2 = anchoredObjects[j].box;
     
-    // Calcula a distância entre os dois blocos
-    // O método THREE.Vector3.distanceTo() faz a conta para nós
     const distance = block1.position.distanceTo(block2.position);
-    
     const text = document.createElement('p');
-    text.textContent = `${anchoredObjects[i].label.text} para ${anchoredObjects[j].label.text}: ${distance.toFixed(2)}m`;
+    // 💡 Agora usando a propriedade blockName
+    text.textContent = `${anchoredObjects[i].blockName} para ${anchoredObjects[j].blockName}: ${distance.toFixed(2)}m`;
     distancePanel.appendChild(text);
    }
   }
  }
- 
+
+ // 💡 Função para exibir as coordenadas
+ function updateCoordinates() {
+  coordinatesPanel.innerHTML = '<h3>Coordenadas Salvas:</h3>';
+  
+  anchoredObjects.forEach(obj => {
+   const pos = obj.box.position;
+   const text = document.createElement('p');
+   text.textContent = `${obj.blockName}: x:${pos.x.toFixed(2)}, y:${pos.y.toFixed(2)}, z:${pos.z.toFixed(2)}`;
+   coordinatesPanel.appendChild(text);
+  });
+ }
 
  function onWindowResize(){
  camera.aspect = window.innerWidth / window.innerHeight;
@@ -199,7 +214,6 @@
    reticle.visible = false;
   }
   }
-
   for (const anchored of anchoredObjects) {
   const anchorPose = frame.getPose(anchored.anchor.anchorSpace, referenceSpace);
   if (anchorPose) {
