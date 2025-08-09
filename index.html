@@ -1,193 +1,169 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
- <meta charset="utf-8">
- <meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,viewport-fit=cover">
- <title>WebXR AR Hit Test — Cubo Giratório</title>
- <style>
-  html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#111;color:#ddd}
-  #info{position:fixed;left:10px;top:10px;z-index:2;background:rgba(0,0,0,0.5);padding:10px;border-radius:8px}
-  canvas{display:block}
-    
-  /* 💡 Novo CSS para o painel de coordenadas */
-  #coordinate-list {
-   position: fixed;
-   left: 10px;
-   top: 100px;
-   z-index: 2;
-   background: rgba(0,0,0,0.5);
-   padding: 10px;
-   border-radius: 8px;
-   max-height: calc(100% - 120px);
-   overflow-y: auto;
-  }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,viewport-fit=cover">
+<title>WebXR AR Hit Test — Cubo Ancorado</title>
+<style>
+html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:#111;color:#ddd}
+#info{position:fixed;left:10px;top:10px;z-index:2;background:rgba(0,0,0,0.5);padding:10px;border-radius:8px}
+canvas{display:block}
 </style>
 </head>
 <body>
- <div id="info">
-  <strong>WebXR AR Hit Test</strong><br>
-  Toque no retículo para colocar um cubo. Use um dispositivo compatível (Android + Chrome) e sirva via HTTPS / localhost.
- </div>
- 
-  <div id="coordinate-list">
-  <h3>Posições Salvas:</h3>
- </div>
+<div id="info">
+<strong>WebXR AR Hit Test (Com Âncoras)</strong><br>
+Toque no retículo para colocar um cubo ancorado.
+</div>
 
- <script type="module">
-  import * as THREE from 'https://unpkg.com/three@0.148.0/build/three.module.js';
-  import { ARButton } from 'https://unpkg.com/three@0.148.0/examples/jsm/webxr/ARButton.js';
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.148.0/build/three.module.js';
+import { ARButton } from 'https://unpkg.com/three@0.148.0/examples/jsm/webxr/ARButton.js';
 
-  let camera, scene, renderer;
-  let controller;
-  let reticle;
-  let cubes = [];
+let camera, scene, renderer;
+let controller;
+let reticle;
 
-  let hitTestSource = null;
-  let localReferenceSpace = null;
+// 💡 Agora vamos rastrear os objetos ancorados
+let anchoredObjects = [];
 
-    // 💡 Obtenha o novo elemento de lista
-    const coordinateList = document.getElementById('coordinate-list');
+let hitTestSource = null;
+let localReferenceSpace = null;
+let hitTestResult = null; // Vamos guardar o último resultado do hit test
 
-  init();
-  animate();
+init();
+animate();
 
-  function init(){
-   const container = document.createElement('div');
-   document.body.appendChild(container);
+function init(){
+const container = document.createElement('div');
+document.body.appendChild(container);
 
-   scene = new THREE.Scene();
+scene = new THREE.Scene();
 
-   camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
+camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
 
-   // luz
-   const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-   light.position.set(0.5, 1, 0.25);
-   scene.add(light);
+// luz
+const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+light.position.set(0.5, 1, 0.25);
+scene.add(light);
 
-   // renderer
-   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-   renderer.setPixelRatio(window.devicePixelRatio);
-   renderer.setSize(window.innerWidth, window.innerHeight);
-   renderer.xr.enabled = true;
-   container.appendChild(renderer.domElement);
+// renderer
+renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.xr.enabled = true;
+container.appendChild(renderer.domElement);
 
-   document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+// 💡 Habilitamos o recurso 'anchors' para usar a API de âncoras
+document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test', 'anchors'] }));
 
-   // Reticle (pequeno anel que marca o ponto de hit)
-   const geometry = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI/2);
-   const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-   reticle = new THREE.Mesh(geometry, material);
-   reticle.matrixAutoUpdate = false;
-   reticle.visible = false;
-   scene.add(reticle);
+// Reticle
+const geometry = new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI/2);
+const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+reticle = new THREE.Mesh(geometry, material);
+reticle.matrixAutoUpdate = false;
+reticle.visible = false;
+scene.add(reticle);
 
-   // Controller para escutar 'select' (toque)
-   controller = renderer.xr.getController(0);
-   controller.addEventListener('select', onSelect);
-   scene.add(controller);
+// Controller para escutar 'select' (toque)
+controller = renderer.xr.getController(0);
+controller.addEventListener('select', onSelect);
+scene.add(controller);
 
-   window.addEventListener('resize', onWindowResize);
+window.addEventListener('resize', onWindowResize);
 
-   // Gerenciar start/end da sessão para requisitar o hit test
-   renderer.xr.addEventListener('sessionstart', onSessionStart);
-   renderer.xr.addEventListener('sessionend', onSessionEnd);
-  }
+// Gerenciar start/end da sessão
+renderer.xr.addEventListener('sessionstart', onSessionStart);
+renderer.xr.addEventListener('sessionend', onSessionEnd);
+}
 
-  function onSessionStart(){
-   const session = renderer.xr.getSession();
+function onSessionStart(){
+const session = renderer.xr.getSession();
 
-   // pedir reference spaces
-   session.requestReferenceSpace('viewer').then(function(viewerReferenceSpace){
-    session.requestHitTestSource({ space: viewerReferenceSpace }).then(function(source){
-     hitTestSource = source;
-    });
-   });
+session.requestReferenceSpace('viewer').then(function(viewerReferenceSpace){
+session.requestHitTestSource({ space: viewerReferenceSpace }).then(function(source){
+hitTestSource = source;
+});
+});
 
-   // local para posicionamento das poses obtidas por getPose
-   session.requestReferenceSpace('local').then(function(refSpace){
-    localReferenceSpace = refSpace;
-   });
-  }
+session.requestReferenceSpace('local').then(function(refSpace){
+localReferenceSpace = refSpace;
+});
+}
 
-  function onSessionEnd(){
-   hitTestSource = null;
-   localReferenceSpace = null;
-   reticle.visible = false;
-   
-   // Limpa a lista de cubos e a exibição
-   cubes = [];
-   coordinateList.innerHTML = '<h3>Posições Salvas:</h3>';
-  }
+function onSessionEnd(){
+hitTestSource = null;
+localReferenceSpace = null;
+reticle.visible = false;
+anchoredObjects = [];
+}
 
-  function onSelect(){
-   if (!reticle.visible) return;
+// 💡 Modificamos a função onSelect para criar a âncora
+function onSelect(){
+if (!reticle.visible || !localReferenceSpace || !hitTestResult) return;
 
-   // Criar um cubo e posicionar de acordo com o reticle
-   const boxGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
-   const boxMat = new THREE.MeshStandardMaterial({ roughness:0.7, metalness:0.0 });
-   const box = new THREE.Mesh(boxGeo, boxMat);
+const session = renderer.xr.getSession();
 
-   // usar a matrix do reticle (que está em localReferenceSpace) para posicionar o cubo
-   box.position.setFromMatrixPosition(reticle.matrix);
-   scene.add(box);
-   
-   cubes.push(box); 
-   
-   // 💡 Chamada para atualizar a lista de coordenadas
-   updateCoordinateDisplay();
-  }
-    
-    // 💡 Função para exibir as coordenadas salvas
-    function updateCoordinateDisplay() {
-        // Limpa o conteúdo do painel antes de adicionar os novos itens
-        coordinateList.innerHTML = '<h3>Posições Salvas:</h3>';
-        
-        cubes.forEach((cube, index) => {
-            const pos = cube.position;
-            const item = document.createElement('p');
-            // Formata as coordenadas para ter apenas 2 casas decimais
-            item.textContent = `Cubo ${index + 1}: x:${pos.x.toFixed(2)}, y:${pos.y.toFixed(2)}, z:${pos.z.toFixed(2)}`;
-            coordinateList.appendChild(item);
-        });
-    }
+// Cria a âncora na posição do último hit test
+// A promisse retorna a âncora criada
+session.createAnchor(hitTestResult.transform, localReferenceSpace)
+.then(anchor => {
+console.log("Âncora criada com sucesso!");
+// Quando a âncora é criada, criamos nosso objeto 3D
+const boxGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+const boxMat = new THREE.MeshStandardMaterial({ roughness:0.7, metalness:0.0 });
+const box = new THREE.Mesh(boxGeo, boxMat);
+          
+// Adicionamos o objeto à cena
+scene.add(box);
 
-  function onWindowResize(){
-   camera.aspect = window.innerWidth / window.innerHeight;
-   camera.updateProjectionMatrix();
-   renderer.setSize(window.innerWidth, window.innerHeight);
-  }
+// Guardamos a referência do objeto e da âncora juntos
+anchoredObjects.push({ anchor, box });
+})
+.catch(error => {
+console.error("Erro ao criar âncora:", error);
+});
+}
 
-  // loop de render
-  function animate(){
-   renderer.setAnimationLoop(render);
-  }
+function onWindowResize(){
+camera.aspect = window.innerWidth / window.innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(window.innerWidth, window.innerHeight);
+}
 
-  function render(timestamp, frame){
-   if (frame){
-    const referenceSpace = localReferenceSpace;
+function animate(){
+renderer.setAnimationLoop(render);
+}
 
-    if (hitTestSource && referenceSpace){
-     const hitTestResults = frame.getHitTestResults(hitTestSource);
+// 💡 Modificamos o loop de renderização para atualizar os cubos com base nas âncoras
+function render(timestamp, frame){
+if (frame){
+const referenceSpace = localReferenceSpace;
 
-     if (hitTestResults.length > 0){
-      const hit = hitTestResults[0];
-      const pose = hit.getPose(referenceSpace);
+if (hitTestSource && referenceSpace){
+const hitTestResults = frame.getHitTestResults(hitTestSource);
+if (hitTestResults.length > 0){
+hitTestResult = hitTestResults[0];
+const pose = hitTestResult.getPose(referenceSpace);
+if (pose) {
+reticle.visible = true;
+reticle.matrix.fromArray(pose.transform.matrix);
+}
+} else {
+reticle.visible = false;
+}
+}
 
-      // colocar reticle na pose retornada
-      reticle.visible = true;
-      reticle.matrix.fromArray(pose.transform.matrix);
-     } else {
-      reticle.visible = false;
-     }
-    }
-   }
-
-   for (const cube of cubes) {
-    cube.rotation.y += 0.02; 
-   }
-
-   renderer.render(scene, camera);
-  }
- </script>
+// Atualiza a posição de todos os cubos com base em suas âncoras
+for (const anchored of anchoredObjects) {
+const anchorPose = frame.getPose(anchored.anchor.anchorSpace, referenceSpace);
+if (anchorPose) {
+anchored.box.matrix.fromArray(anchorPose.transform.matrix);
+}
+}
+}
+renderer.render(scene, camera);
+}
+</script>
 </body>
 </html>
